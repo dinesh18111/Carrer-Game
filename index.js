@@ -1,91 +1,137 @@
-/**
- * @license
- * Copyright 2017 Google LLC
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+import {
+    defaultMemoize,
+    defaultEqualityCheck
+} from './defaultMemoize';
+export {
+    defaultMemoize,
+    defaultEqualityCheck
+};
 
-/**
- * Bring in closure-library dependencies
- */
+function getDependencies(funcs) {
+    var dependencies = Array.isArray(funcs[0]) ? funcs[0] : funcs;
 
-goog.provide('firebase.webchannel.wrapper');
+    if (!dependencies.every(function(dep) {
+            return typeof dep === 'function';
+        })) {
+        var dependencyTypes = dependencies.map(function(dep) {
+            return typeof dep === 'function' ? "function " + (dep.name || 'unnamed') + "()" : typeof dep;
+        }).join(', ');
+        throw new Error("createSelector expects all input-selectors to be functions, but received the following types: [" + dependencyTypes + "]");
+    }
 
-// goog.net.WebChannelTransport
-goog.require('goog.net.createWebChannelTransport');
-goog.require('goog.net.FetchXmlHttpFactory');
-goog.require('goog.labs.net.webChannel.requestStats');
-goog.require('goog.labs.net.webChannel.WebChannelBaseTransport');
+    return dependencies;
+}
 
-/**
- * NOTE: The `createWebChannel` function takes an options object as a second param
- * whose properties are typically mangled. We override these in externs/overrides.js
- * Without those externs, this does not function properly.
- */
-goog.labs.net.webChannel.WebChannelBaseTransport.prototype['createWebChannel'] =
-    goog.labs.net.webChannel.WebChannelBaseTransport.prototype.createWebChannel;
-goog.labs.net.webChannel.WebChannelBaseTransport.Channel.prototype['send'] =
-    goog.labs.net.webChannel.WebChannelBaseTransport.Channel.prototype.send;
-goog.labs.net.webChannel.WebChannelBaseTransport.Channel.prototype['open'] =
-    goog.labs.net.webChannel.WebChannelBaseTransport.Channel.prototype.open;
-goog.labs.net.webChannel.WebChannelBaseTransport.Channel.prototype['close'] =
-    goog.labs.net.webChannel.WebChannelBaseTransport.Channel.prototype.close;
+export function createSelectorCreator(memoize) {
+    for (var _len = arguments.length, memoizeOptionsFromArgs = new Array(_len > 1 ? _len - 1 : 0), _key = 1; _key < _len; _key++) {
+        memoizeOptionsFromArgs[_key - 1] = arguments[_key];
+    }
 
-// goog.net.ErrorCode
-goog.require('goog.net.ErrorCode');
-goog.net.ErrorCode['NO_ERROR'] = goog.net.ErrorCode.NO_ERROR;
-goog.net.ErrorCode['TIMEOUT'] = goog.net.ErrorCode.TIMEOUT;
-goog.net.ErrorCode['HTTP_ERROR'] = goog.net.ErrorCode.HTTP_ERROR;
+    var createSelector = function createSelector() {
+        for (var _len2 = arguments.length, funcs = new Array(_len2), _key2 = 0; _key2 < _len2; _key2++) {
+            funcs[_key2] = arguments[_key2];
+        }
 
-// goog.net.ErrorType
-goog.require('goog.net.EventType');
-goog.net.EventType['COMPLETE'] = goog.net.EventType.COMPLETE;
+        var _recomputations = 0;
 
-// goog.net.WebChannel
-goog.require('goog.net.WebChannel');
-goog.require('goog.events.EventTarget');
-goog.net.WebChannel['EventType'] = goog.net.WebChannel.EventType;
-goog.net.WebChannel.EventType['OPEN'] = goog.net.WebChannel.EventType.OPEN;
-goog.net.WebChannel.EventType['CLOSE'] = goog.net.WebChannel.EventType.CLOSE;
-goog.net.WebChannel.EventType['ERROR'] = goog.net.WebChannel.EventType.ERROR;
-goog.net.WebChannel.EventType['MESSAGE'] =
-    goog.net.WebChannel.EventType.MESSAGE;
-goog.events.EventTarget.prototype['listen'] =
-    goog.events.EventTarget.prototype.listen;
+        var _lastResult; // Due to the intricacies of rest params, we can't do an optional arg after `...funcs`.
+        // So, start by declaring the default value here.
+        // (And yes, the words 'memoize' and 'options' appear too many times in this next sequence.)
 
-goog.require('goog.net.XhrIo');
-goog.net.XhrIo.prototype['listenOnce'] = goog.net.XhrIo.prototype.listenOnce;
-goog.net.XhrIo.prototype['getLastError'] =
-    goog.net.XhrIo.prototype.getLastError;
-goog.net.XhrIo.prototype['getLastErrorCode'] =
-    goog.net.XhrIo.prototype.getLastErrorCode;
-goog.net.XhrIo.prototype['getStatus'] = goog.net.XhrIo.prototype.getStatus;
-goog.net.XhrIo.prototype['getResponseJson'] =
-    goog.net.XhrIo.prototype.getResponseJson;
-goog.net.XhrIo.prototype['getResponseText'] =
-    goog.net.XhrIo.prototype.getResponseText;
-goog.net.XhrIo.prototype['send'] = goog.net.XhrIo.prototype.send;
-goog.net.XhrIo.prototype['setWithCredentials'] =
-    goog.net.XhrIo.prototype.setWithCredentials;
 
-module['exports']['createWebChannelTransport'] =
-    goog.net.createWebChannelTransport;
-module['exports']['getStatEventTarget'] =
-    goog.labs.net.webChannel.requestStats.getStatEventTarget;
-module['exports']['ErrorCode'] = goog.net.ErrorCode;
-module['exports']['EventType'] = goog.net.EventType;
-module['exports']['Event'] = goog.labs.net.webChannel.requestStats.Event;
-module['exports']['Stat'] = goog.labs.net.webChannel.requestStats.Stat;
-module['exports']['FetchXmlHttpFactory'] = goog.net.FetchXmlHttpFactory;
-module['exports']['WebChannel'] = goog.net.WebChannel;
-module['exports']['XhrIo'] = goog.net.XhrIo;
+        var directlyPassedOptions = {
+            memoizeOptions: undefined
+        }; // Normally, the result func or "output selector" is the last arg
+
+        var resultFunc = funcs.pop(); // If the result func is actually an _object_, assume it's our options object
+
+        if (typeof resultFunc === 'object') {
+            directlyPassedOptions = resultFunc; // and pop the real result func off
+
+            resultFunc = funcs.pop();
+        }
+
+        if (typeof resultFunc !== 'function') {
+            throw new Error("createSelector expects an output function after the inputs, but received: [" + typeof resultFunc + "]");
+        } // Determine which set of options we're using. Prefer options passed directly,
+        // but fall back to options given to createSelectorCreator.
+
+
+        var _directlyPassedOption = directlyPassedOptions,
+            _directlyPassedOption2 = _directlyPassedOption.memoizeOptions,
+            memoizeOptions = _directlyPassedOption2 === void 0 ? memoizeOptionsFromArgs : _directlyPassedOption2; // Simplifying assumption: it's unlikely that the first options arg of the provided memoizer
+        // is an array. In most libs I've looked at, it's an equality function or options object.
+        // Based on that, if `memoizeOptions` _is_ an array, we assume it's a full
+        // user-provided array of options. Otherwise, it must be just the _first_ arg, and so
+        // we wrap it in an array so we can apply it.
+
+        var finalMemoizeOptions = Array.isArray(memoizeOptions) ? memoizeOptions : [memoizeOptions];
+        var dependencies = getDependencies(funcs);
+        var memoizedResultFunc = memoize.apply(void 0, [function recomputationWrapper() {
+            _recomputations++; // apply arguments instead of spreading for performance.
+
+            return resultFunc.apply(null, arguments);
+        }].concat(finalMemoizeOptions)); // If a selector is called with the exact same arguments we don't need to traverse our dependencies again.
+
+        var selector = memoize(function dependenciesChecker() {
+            var params = [];
+            var length = dependencies.length;
+
+            for (var i = 0; i < length; i++) {
+                // apply arguments instead of spreading and mutate a local list of params for performance.
+                // @ts-ignore
+                params.push(dependencies[i].apply(null, arguments));
+            } // apply arguments instead of spreading for performance.
+
+
+            _lastResult = memoizedResultFunc.apply(null, params);
+            return _lastResult;
+        });
+        Object.assign(selector, {
+            resultFunc: resultFunc,
+            memoizedResultFunc: memoizedResultFunc,
+            dependencies: dependencies,
+            lastResult: function lastResult() {
+                return _lastResult;
+            },
+            recomputations: function recomputations() {
+                return _recomputations;
+            },
+            resetRecomputations: function resetRecomputations() {
+                return _recomputations = 0;
+            }
+        });
+        return selector;
+    }; // @ts-ignore
+
+
+    return createSelector;
+}
+export var createSelector = /* #__PURE__ */ createSelectorCreator(defaultMemoize);
+// Manual definition of state and output arguments
+export var createStructuredSelector = function createStructuredSelector(selectors, selectorCreator) {
+    if (selectorCreator === void 0) {
+        selectorCreator = createSelector;
+    }
+
+    if (typeof selectors !== 'object') {
+        throw new Error('createStructuredSelector expects first argument to be an object ' + ("where each property is a selector, instead received a " + typeof selectors));
+    }
+
+    var objectKeys = Object.keys(selectors);
+    var resultSelector = selectorCreator( // @ts-ignore
+        objectKeys.map(function(key) {
+            return selectors[key];
+        }),
+        function() {
+            for (var _len3 = arguments.length, values = new Array(_len3), _key3 = 0; _key3 < _len3; _key3++) {
+                values[_key3] = arguments[_key3];
+            }
+
+            return values.reduce(function(composition, value, index) {
+                composition[objectKeys[index]] = value;
+                return composition;
+            }, {});
+        });
+    return resultSelector;
+};
