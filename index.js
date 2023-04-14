@@ -1,105 +1,91 @@
-import {
-    w as wrap,
-    r as replaceTraps
-} from './wrap-idb-value.js';
-export {
-    u as unwrap, w as wrap
-}
-from './wrap-idb-value.js';
+/**
+ * @license
+ * Copyright 2017 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 /**
- * Open a database.
- *
- * @param name Name of the database.
- * @param version Schema version.
- * @param callbacks Additional callbacks.
+ * Bring in closure-library dependencies
  */
-function openDB(name, version, {
-    blocked,
-    upgrade,
-    blocking,
-    terminated
-} = {}) {
-    const request = indexedDB.open(name, version);
-    const openPromise = wrap(request);
-    if (upgrade) {
-        request.addEventListener('upgradeneeded', (event) => {
-            upgrade(wrap(request.result), event.oldVersion, event.newVersion, wrap(request.transaction));
-        });
-    }
-    if (blocked)
-        request.addEventListener('blocked', () => blocked());
-    openPromise
-        .then((db) => {
-            if (terminated)
-                db.addEventListener('close', () => terminated());
-            if (blocking)
-                db.addEventListener('versionchange', () => blocking());
-        })
-        .catch(() => {});
-    return openPromise;
-}
+
+goog.provide('firebase.webchannel.wrapper');
+
+// goog.net.WebChannelTransport
+goog.require('goog.net.createWebChannelTransport');
+goog.require('goog.net.FetchXmlHttpFactory');
+goog.require('goog.labs.net.webChannel.requestStats');
+goog.require('goog.labs.net.webChannel.WebChannelBaseTransport');
+
 /**
- * Delete a database.
- *
- * @param name Name of the database.
+ * NOTE: The `createWebChannel` function takes an options object as a second param
+ * whose properties are typically mangled. We override these in externs/overrides.js
+ * Without those externs, this does not function properly.
  */
-function deleteDB(name, {
-    blocked
-} = {}) {
-    const request = indexedDB.deleteDatabase(name);
-    if (blocked)
-        request.addEventListener('blocked', () => blocked());
-    return wrap(request).then(() => undefined);
-}
+goog.labs.net.webChannel.WebChannelBaseTransport.prototype['createWebChannel'] =
+    goog.labs.net.webChannel.WebChannelBaseTransport.prototype.createWebChannel;
+goog.labs.net.webChannel.WebChannelBaseTransport.Channel.prototype['send'] =
+    goog.labs.net.webChannel.WebChannelBaseTransport.Channel.prototype.send;
+goog.labs.net.webChannel.WebChannelBaseTransport.Channel.prototype['open'] =
+    goog.labs.net.webChannel.WebChannelBaseTransport.Channel.prototype.open;
+goog.labs.net.webChannel.WebChannelBaseTransport.Channel.prototype['close'] =
+    goog.labs.net.webChannel.WebChannelBaseTransport.Channel.prototype.close;
 
-const readMethods = ['get', 'getKey', 'getAll', 'getAllKeys', 'count'];
-const writeMethods = ['put', 'add', 'delete', 'clear'];
-const cachedMethods = new Map();
+// goog.net.ErrorCode
+goog.require('goog.net.ErrorCode');
+goog.net.ErrorCode['NO_ERROR'] = goog.net.ErrorCode.NO_ERROR;
+goog.net.ErrorCode['TIMEOUT'] = goog.net.ErrorCode.TIMEOUT;
+goog.net.ErrorCode['HTTP_ERROR'] = goog.net.ErrorCode.HTTP_ERROR;
 
-function getMethod(target, prop) {
-    if (!(target instanceof IDBDatabase &&
-            !(prop in target) &&
-            typeof prop === 'string')) {
-        return;
-    }
-    if (cachedMethods.get(prop))
-        return cachedMethods.get(prop);
-    const targetFuncName = prop.replace(/FromIndex$/, '');
-    const useIndex = prop !== targetFuncName;
-    const isWrite = writeMethods.includes(targetFuncName);
-    if (
-        // Bail if the target doesn't exist on the target. Eg, getAll isn't in Edge.
-        !(targetFuncName in (useIndex ? IDBIndex : IDBObjectStore).prototype) ||
-        !(isWrite || readMethods.includes(targetFuncName))) {
-        return;
-    }
-    const method = async function(storeName, ...args) {
-        // isWrite ? 'readwrite' : undefined gzipps better, but fails in Edge :(
-        const tx = this.transaction(storeName, isWrite ? 'readwrite' : 'readonly');
-        let target = tx.store;
-        if (useIndex)
-            target = target.index(args.shift());
-        // Must reject if op rejects.
-        // If it's a write operation, must reject if tx.done rejects.
-        // Must reject with op rejection first.
-        // Must resolve with op value.
-        // Must handle both promises (no unhandled rejections)
-        return (await Promise.all([
-            target[targetFuncName](...args),
-            isWrite && tx.done,
-        ]))[0];
-    };
-    cachedMethods.set(prop, method);
-    return method;
-}
-replaceTraps((oldTraps) => ({
-    ...oldTraps,
-    get: (target, prop, receiver) => getMethod(target, prop) || oldTraps.get(target, prop, receiver),
-    has: (target, prop) => !!getMethod(target, prop) || oldTraps.has(target, prop),
-}));
+// goog.net.ErrorType
+goog.require('goog.net.EventType');
+goog.net.EventType['COMPLETE'] = goog.net.EventType.COMPLETE;
 
-export {
-    deleteDB,
-    openDB
-};
+// goog.net.WebChannel
+goog.require('goog.net.WebChannel');
+goog.require('goog.events.EventTarget');
+goog.net.WebChannel['EventType'] = goog.net.WebChannel.EventType;
+goog.net.WebChannel.EventType['OPEN'] = goog.net.WebChannel.EventType.OPEN;
+goog.net.WebChannel.EventType['CLOSE'] = goog.net.WebChannel.EventType.CLOSE;
+goog.net.WebChannel.EventType['ERROR'] = goog.net.WebChannel.EventType.ERROR;
+goog.net.WebChannel.EventType['MESSAGE'] =
+    goog.net.WebChannel.EventType.MESSAGE;
+goog.events.EventTarget.prototype['listen'] =
+    goog.events.EventTarget.prototype.listen;
+
+goog.require('goog.net.XhrIo');
+goog.net.XhrIo.prototype['listenOnce'] = goog.net.XhrIo.prototype.listenOnce;
+goog.net.XhrIo.prototype['getLastError'] =
+    goog.net.XhrIo.prototype.getLastError;
+goog.net.XhrIo.prototype['getLastErrorCode'] =
+    goog.net.XhrIo.prototype.getLastErrorCode;
+goog.net.XhrIo.prototype['getStatus'] = goog.net.XhrIo.prototype.getStatus;
+goog.net.XhrIo.prototype['getResponseJson'] =
+    goog.net.XhrIo.prototype.getResponseJson;
+goog.net.XhrIo.prototype['getResponseText'] =
+    goog.net.XhrIo.prototype.getResponseText;
+goog.net.XhrIo.prototype['send'] = goog.net.XhrIo.prototype.send;
+goog.net.XhrIo.prototype['setWithCredentials'] =
+    goog.net.XhrIo.prototype.setWithCredentials;
+
+module['exports']['createWebChannelTransport'] =
+    goog.net.createWebChannelTransport;
+module['exports']['getStatEventTarget'] =
+    goog.labs.net.webChannel.requestStats.getStatEventTarget;
+module['exports']['ErrorCode'] = goog.net.ErrorCode;
+module['exports']['EventType'] = goog.net.EventType;
+module['exports']['Event'] = goog.labs.net.webChannel.requestStats.Event;
+module['exports']['Stat'] = goog.labs.net.webChannel.requestStats.Stat;
+module['exports']['FetchXmlHttpFactory'] = goog.net.FetchXmlHttpFactory;
+module['exports']['WebChannel'] = goog.net.WebChannel;
+module['exports']['XhrIo'] = goog.net.XhrIo;
